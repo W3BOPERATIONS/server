@@ -10,7 +10,7 @@ app.use(cors({
   origin: [
     "http://localhost:3000",
     "http://localhost:5173", 
-    "https://your-frontend-domain.vercel.app",
+    "https://chips-client.vercel.app/",
     /\.vercel\.app$/
   ],
   credentials: true
