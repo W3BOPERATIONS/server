@@ -1,11 +1,13 @@
 const express = require("express")
 const mongoose = require("mongoose")
 const cors = require("cors")
+const dotenv = require("dotenv")
+
+dotenv.config()
 
 const app = express()
 const PORT = process.env.PORT || 5000
 
-// Middleware
 app.use(
   cors({
     origin: [
@@ -15,17 +17,22 @@ app.use(
       /\.vercel\.app$/,
     ],
     credentials: true,
-  })
+  }),
 )
 app.use(express.json({ limit: "10mb" }))
 app.use(express.urlencoded({ extended: true, limit: "10mb" }))
 
-// Global connection variable
-let cachedConnection = null
+let isConnected = false
+let connectionPromise = null
 
 const connectDB = async () => {
-  if (cachedConnection) {
-    return cachedConnection
+  if (isConnected && mongoose.connection.readyState === 1) {
+    return mongoose.connection
+  }
+
+  // Prevent multiple connection attempts
+  if (connectionPromise) {
+    return connectionPromise
   }
 
   try {
@@ -33,106 +40,210 @@ const connectDB = async () => {
       throw new Error("MONGODB_URI environment variable is not set")
     }
 
-    console.log("🔄 Connecting to MongoDB Atlas...")
+    console.log("[v0] 🔄 Connecting to MongoDB Atlas...")
 
-    const connection = await mongoose.connect(process.env.MONGODB_URI, {
+    connectionPromise = mongoose.connect(process.env.MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 5000,
+      serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 45000,
+      maxPoolSize: 10,
+      bufferCommands: false,
+      bufferMaxEntries: 0,
     })
 
-    cachedConnection = connection
-    console.log("✅ MongoDB Atlas connected successfully")
-    return connection
+    await connectionPromise
+    isConnected = true
+    console.log("[v0] ✅ MongoDB Atlas connected successfully")
+    console.log("[v0] 📊 Database:", mongoose.connection.name)
+
+    return mongoose.connection
   } catch (err) {
-    console.error("❌ MongoDB connection error:", err.message)
-    cachedConnection = null
+    console.error("[v0] ❌ MongoDB connection error:", err.message)
+    isConnected = false
+    connectionPromise = null
     throw err
   }
 }
 
-// Connection middleware - Vercel compatible
 app.use(async (req, res, next) => {
   try {
     await connectDB()
     next()
   } catch (error) {
-    console.error("Database connection failed:", error)
-    
-    // Don't send response here, let routes handle it
-    req.dbConnectionFailed = true
-    next()
+    console.error("[v0] Database connection failed:", error)
+    res.status(500).json({
+      error: "Database connection failed",
+      message: "Unable to connect to MongoDB Atlas",
+      timestamp: new Date().toISOString(),
+    })
   }
 })
 
-// Health check (without DB dependency)
 app.get("/api/health", async (req, res) => {
-  const dbStatus = mongoose.connection.readyState
-  const dbStates = {
-    0: "Disconnected",
-    1: "Connected",
-    2: "Connecting",
-    3: "Disconnecting",
-  }
+  try {
+    const dbStatus = mongoose.connection.readyState
+    const dbStates = {
+      0: "Disconnected",
+      1: "Connected",
+      2: "Connecting",
+      3: "Disconnecting",
+    }
 
-  res.json({
-    status: "OK",
-    message: "Server is running!",
-    database: {
-      status: dbStates[dbStatus] || "Unknown",
-      readyState: dbStatus,
-    },
-    server: {
-      timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV || "development",
-    },
-  })
-})
+    // Test database connection
+    let dbTest = "Failed"
+    try {
+      await mongoose.connection.db.admin().ping()
+      dbTest = "Success"
+    } catch (e) {
+      console.error("[v0] DB ping failed:", e.message)
+    }
 
-// Routes with error handling
-app.use("/api/products", (req, res, next) => {
-  if (req.dbConnectionFailed) {
-    return res.status(500).json({
-      error: "Database connection failed",
-      message: "Unable to connect to MongoDB Atlas",
+    res.json({
+      status: "OK",
+      message: "Server is running!",
+      mongodb: {
+        status: dbStates[dbStatus] || "Unknown",
+        readyState: dbStatus,
+        database: mongoose.connection.name || "Not connected",
+        ping: dbTest,
+      },
+      server: {
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV || "development",
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        version: "1.0.0",
+      },
+      endpoints: [
+        "/api/health",
+        "/api/health/detailed",
+        "/api/auth",
+        "/api/products",
+        "/api/orders",
+        "/api/admin",
+        "/api/reviews",
+      ],
+    })
+  } catch (error) {
+    console.error("[v0] Health check error:", error)
+    res.status(500).json({
+      status: "ERROR",
+      message: "Health check failed",
+      error: error.message,
       timestamp: new Date().toISOString(),
     })
   }
-  require("./routes/products")(req, res, next)
 })
 
-app.use("/api/orders", (req, res, next) => {
-  if (req.dbConnectionFailed) {
-    return res.status(500).json({
-      error: "Database connection failed",
-      message: "Unable to connect to MongoDB Atlas",
+app.get("/api/health/detailed", async (req, res) => {
+  try {
+    const envVars = {
+      MONGODB_URI: !!process.env.MONGODB_URI,
+      JWT_SECRET: !!process.env.JWT_SECRET,
+      ADMIN_KEY: !!process.env.ADMIN_KEY,
+      EMAIL_USER: !!process.env.EMAIL_USER,
+      EMAIL_PASS: !!process.env.EMAIL_PASS,
+      NODE_ENV: process.env.NODE_ENV,
+    }
+
+    res.json({
+      status: "Detailed Health Check",
+      database: {
+        connected: mongoose.connection.readyState === 1,
+        readyState: mongoose.connection.readyState,
+        host: mongoose.connection.host,
+        name: mongoose.connection.name,
+        collections: Object.keys(mongoose.connection.collections),
+      },
+      environment: envVars,
+      server: {
+        platform: process.platform,
+        nodeVersion: process.version,
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        timestamp: new Date().toISOString(),
+      },
+    })
+  } catch (error) {
+    res.status(500).json({
+      status: "ERROR",
+      error: error.message,
       timestamp: new Date().toISOString(),
     })
   }
-  require("./routes/orders")(req, res, next)
 })
 
-// Add similar wrappers for other routes...
+// Routes
+app.use("/api/products", require("./routes/products"))
+app.use("/api/orders", require("./routes/orders"))
+app.use("/api/admin", require("./routes/admin"))
+app.use("/api/auth", require("./routes/auth"))
+app.use("/api/reviews", require("./routes/reviews"))
 
-// Root endpoint
 app.get("/", (req, res) => {
   res.json({
     message: "ChipsStore API is running!",
     version: "1.0.0",
-    database: mongoose.connection.readyState === 1 ? "Connected" : "Disconnected",
+    status: "active",
+    endpoints: {
+      health: "/api/health",
+      detailedHealth: "/api/health/detailed",
+      auth: "/api/auth",
+      products: "/api/products",
+      orders: "/api/orders",
+      admin: "/api/admin",
+      reviews: "/api/reviews",
+    },
     timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || "development",
   })
 })
 
-// 404 handler
 app.use("*", (req, res) => {
+  console.log("[v0] 404 - Route not found:", req.originalUrl)
   res.status(404).json({
     error: "Route not found",
     path: req.originalUrl,
+    method: req.method,
+    message: "The requested endpoint does not exist",
+    availableEndpoints: [
+      "/api/health",
+      "/api/health/detailed",
+      "/api/auth",
+      "/api/products",
+      "/api/orders",
+      "/api/admin",
+      "/api/reviews",
+    ],
     timestamp: new Date().toISOString(),
   })
 })
 
-// Vercel requires module.exports without server listening
 module.exports = app
+
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`)
+    console.log(`🔍 Environment: ${process.env.NODE_ENV || "development"}`)
+    console.log(`📊 MongoDB URI configured: ${!!process.env.MONGODB_URI}`)
+  })
+}
+
+process.on("SIGINT", async () => {
+  console.log("\n🔄 Shutting down gracefully...")
+  if (mongoose.connection.readyState === 1) {
+    await mongoose.connection.close()
+    console.log("✅ MongoDB connection closed")
+  }
+  process.exit(0)
+})
+
+process.on("SIGTERM", async () => {
+  console.log("🔄 SIGTERM received, shutting down gracefully...")
+  if (mongoose.connection.readyState === 1) {
+    await mongoose.connection.close()
+    console.log("✅ MongoDB connection closed")
+  }
+  process.exit(0)
+})
