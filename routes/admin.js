@@ -7,7 +7,7 @@ const User = require("../models/User")
 
 router.get("/login", (req, res) => {
   // Redirect to the frontend admin login page
-  res.redirect("http://localhost:3000/admin-login")
+  res.redirect("https://chips-client.vercel.app//admin-login")
 })
 
 router.post("/login", async (req, res) => {
