@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: chips-backend
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        fromDatabase:
+          name: chips-ecommerce
+          property: connectionString
+      - key: ADMIN_KEY
+        generateValue: true
+      - key: PORT
+        value: 5000
+
+databases:
+  - name: chips-ecommerce
+    databaseName: chips_ecommerce
+    user: admin
