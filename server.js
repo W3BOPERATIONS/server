@@ -9,10 +9,12 @@ const PORT = process.env.PORT || 5000;
 app.use(cors({
   origin: [
     "http://localhost:3000",
-    "http://localhost:5173", 
-    "https://chips-client.vercel.app/",
-    /\.vercel\.app$/
+    "http://localhost:5173",
+    "https://chips-client.vercel.app",
+    "https://www.crunchywavez.com",   // ✅ Your new GoDaddy domain
+    /\.vercel\.app$/                  // ✅ Allow all Vercel subdomains
   ],
+  methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true
 }));
 
