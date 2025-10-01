@@ -1,50 +1,80 @@
-const express = require("express");
-const mongoose = require("mongoose");
-const cors = require("cors");
+const express = require("express")
+const mongoose = require("mongoose")
+const cors = require("cors")
+const dotenv = require("dotenv")
 
-const app = express();
-const PORT = process.env.PORT || 5000;
+dotenv.config()
+
+const app = express()
+const PORT = process.env.PORT || 5000
+
+const corsOrigins = [
+  process.env.CLIENT_URL_1 || "http://localhost:3000",
+  process.env.CLIENT_URL_2 || "https://www.crunchywavez.com",
+  "http://localhost:3000", // Vite default port
+  "http://localhost:5173", // Alternative Vite port
+  "https://chips-client.vercel.app",
+  "https://www.crunchywavez.com",
+  /\.vercel\.app$/, // Allow all Vercel preview deployments
+].filter(Boolean)
 
 // Middleware
-app.use(cors({
-  origin: [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "https://chips-client.vercel.app",
-    "https://www.crunchywavez.com",   // ✅ Your new GoDaddy domain
-    /\.vercel\.app$/                  // ✅ Allow all Vercel subdomains
-  ],
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true)
 
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+      // Check if origin matches any allowed origin
+      const isAllowed = corsOrigins.some((allowedOrigin) => {
+        if (typeof allowedOrigin === "string") {
+          return allowedOrigin === origin
+        }
+        if (allowedOrigin instanceof RegExp) {
+          return allowedOrigin.test(origin)
+        }
+        return false
+      })
+
+      if (isAllowed) {
+        callback(null, true)
+      } else {
+        console.log("[CORS] Blocked origin:", origin)
+        callback(new Error("Not allowed by CORS"))
+      }
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization", "x-admin-key"],
+  }),
+)
+
+app.use(express.json({ limit: "10mb" }))
+app.use(express.urlencoded({ extended: true, limit: "10mb" }))
 
 // Database connection with caching for Vercel serverless
-let isConnected = false;
-let connectionPromise = null;
+let isConnected = false
+let connectionPromise = null
 
 const connectDB = async () => {
   if (isConnected) {
-    console.log("✅ Using existing database connection");
-    return mongoose.connection;
+    console.log("✅ Using existing database connection")
+    return mongoose.connection
   }
 
   if (connectionPromise) {
-    console.log("🔄 Connection in progress, waiting...");
-    return connectionPromise;
+    console.log("🔄 Connection in progress, waiting...")
+    return connectionPromise
   }
 
   try {
-    console.log("🔄 Attempting MongoDB connection...");
-    
+    console.log("🔄 Attempting MongoDB connection...")
+
     // Check if MONGODB_URI exists
     if (!process.env.MONGODB_URI) {
-      throw new Error("MONGODB_URI environment variable is missing");
+      throw new Error("MONGODB_URI environment variable is missing")
     }
 
-    console.log("MONGODB_URI found:", process.env.MONGODB_URI ? "Yes" : "No");
+    console.log("MONGODB_URI found:", process.env.MONGODB_URI ? "Yes" : "No")
 
     connectionPromise = mongoose.connect(process.env.MONGODB_URI, {
       useNewUrlParser: true,
@@ -52,56 +82,56 @@ const connectDB = async () => {
       serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 45000,
       bufferCommands: false,
-      maxPoolSize: 10
-    });
+      maxPoolSize: 10,
+    })
 
-    const connection = await connectionPromise;
-    isConnected = true;
-    
-    console.log("✅ MongoDB connected successfully!");
-    console.log("📊 Database:", mongoose.connection.name);
-    console.log("🏠 Host:", mongoose.connection.host);
-    
-    return connection;
+    const connection = await connectionPromise
+    isConnected = true
+
+    console.log("✅ MongoDB connected successfully!")
+    console.log("📊 Database:", mongoose.connection.name)
+    console.log("🏠 Host:", mongoose.connection.host)
+
+    return connection
   } catch (error) {
-    console.error("❌ MongoDB connection failed:", error.message);
-    isConnected = false;
-    connectionPromise = null;
-    throw error;
+    console.error("❌ MongoDB connection failed:", error.message)
+    isConnected = false
+    connectionPromise = null
+    throw error
   }
-};
+}
 
 // Connection middleware
 app.use(async (req, res, next) => {
   try {
-    await connectDB();
-    next();
+    await connectDB()
+    next()
   } catch (error) {
-    console.error("Database middleware error:", error.message);
+    console.error("Database middleware error:", error.message)
     // Continue to next middleware, let routes handle the error
-    next();
+    next()
   }
-});
+})
 
 // Health check endpoint
 app.get("/api/health", async (req, res) => {
   try {
-    const dbStatus = mongoose.connection.readyState;
+    const dbStatus = mongoose.connection.readyState
     const dbStates = {
       0: "Disconnected",
-      1: "Connected", 
+      1: "Connected",
       2: "Connecting",
-      3: "Disconnecting"
-    };
+      3: "Disconnecting",
+    }
 
     // Try to ping database if connected
-    let dbPing = "Not tested";
+    let dbPing = "Not tested"
     if (dbStatus === 1) {
       try {
-        await mongoose.connection.db.admin().ping();
-        dbPing = "Successful";
+        await mongoose.connection.db.admin().ping()
+        dbPing = "Successful"
       } catch (pingError) {
-        dbPing = "Failed: " + pingError.message;
+        dbPing = "Failed: " + pingError.message
       }
     }
 
@@ -111,53 +141,53 @@ app.get("/api/health", async (req, res) => {
         status: dbStates[dbStatus] || "Unknown",
         readyState: dbStatus,
         connection: dbStatus === 1 ? "Healthy" : "Disconnected",
-        ping: dbPing
+        ping: dbPing,
       },
       server: {
         environment: process.env.NODE_ENV || "development",
         timestamp: new Date().toISOString(),
-        uptime: process.uptime()
+        uptime: process.uptime(),
       },
       environment: {
         MONGODB_URI_set: !!process.env.MONGODB_URI,
-        NODE_ENV: process.env.NODE_ENV
-      }
-    });
+        NODE_ENV: process.env.NODE_ENV,
+      },
+    })
   } catch (error) {
     res.status(500).json({
       status: "Error",
       message: "Health check failed",
       error: error.message,
-      timestamp: new Date().toISOString()
-    });
+      timestamp: new Date().toISOString(),
+    })
   }
-});
+})
 
 // Test database connection endpoint
 app.get("/api/test-db", async (req, res) => {
   try {
-    await connectDB();
-    
+    await connectDB()
+
     res.json({
       success: true,
       message: "Database connection successful!",
       database: {
         name: mongoose.connection.name,
         host: mongoose.connection.host,
-        readyState: mongoose.connection.readyState
+        readyState: mongoose.connection.readyState,
       },
-      timestamp: new Date().toISOString()
-    });
+      timestamp: new Date().toISOString(),
+    })
   } catch (error) {
     res.status(500).json({
       success: false,
       message: "Database connection failed",
       error: error.message,
       MONGODB_URI_set: !!process.env.MONGODB_URI,
-      timestamp: new Date().toISOString()
-    });
+      timestamp: new Date().toISOString(),
+    })
   }
-});
+})
 
 // Simple root endpoint
 app.get("/", (req, res) => {
@@ -172,17 +202,21 @@ app.get("/", (req, res) => {
       testDB: "/api/test-db",
       products: "/api/products",
       orders: "/api/orders",
-      auth: "/api/auth"
-    }
-  });
-});
+      auth: "/api/auth",
+      admin: "/api/admin",
+      reviews: "/api/reviews",
+      contact: "/api/contact",
+    },
+  })
+})
 
 // Routes (Add your actual routes here)
-app.use("/api/products", require("./routes/products"));
-app.use("/api/orders", require("./routes/orders")); 
-app.use("/api/auth", require("./routes/auth"));
-app.use("/api/admin", require("./routes/admin"));
-app.use("/api/reviews", require("./routes/reviews"));
+app.use("/api/products", require("./routes/products"))
+app.use("/api/orders", require("./routes/orders"))
+app.use("/api/auth", require("./routes/auth"))
+app.use("/api/admin", require("./routes/admin"))
+app.use("/api/reviews", require("./routes/reviews"))
+app.use("/api/contact", require("./routes/contact"))
 
 // 404 handler
 app.use("*", (req, res) => {
@@ -193,43 +227,44 @@ app.use("*", (req, res) => {
     timestamp: new Date().toISOString(),
     availableEndpoints: [
       "GET /",
-      "GET /api/health", 
+      "GET /api/health",
       "GET /api/test-db",
       "GET /api/products",
       "GET /api/orders",
-      "POST /api/auth"
-    ]
-  });
-});
+      "POST /api/auth",
+      "POST /api/contact",
+    ],
+  })
+})
 
 // Error handling middleware
 app.use((error, req, res, next) => {
-  console.error("Server error:", error);
+  console.error("Server error:", error)
   res.status(500).json({
     error: "Internal server error",
     message: error.message,
-    timestamp: new Date().toISOString()
-  });
-});
+    timestamp: new Date().toISOString(),
+  })
+})
 
 // Export for Vercel (without listening)
-module.exports = app;
+module.exports = app
 
 // Only listen if not in Vercel environment
 if (require.main === module) {
   const startServer = async () => {
     try {
-      await connectDB();
+      await connectDB()
       app.listen(PORT, () => {
-        console.log(`🚀 Server running on port ${PORT}`);
-        console.log(`📊 Database: ${isConnected ? "Connected" : "Disconnected"}`);
-        console.log(`🔧 Environment: ${process.env.NODE_ENV || "development"}`);
-      });
+        console.log(`🚀 Server running on port ${PORT}`)
+        console.log(`📊 Database: ${isConnected ? "Connected" : "Disconnected"}`)
+        console.log(`🔧 Environment: ${process.env.NODE_ENV || "development"}`)
+      })
     } catch (error) {
-      console.error("Failed to start server:", error);
-      process.exit(1);
+      console.error("Failed to start server:", error)
+      process.exit(1)
     }
-  };
+  }
 
-  startServer();
+  startServer()
 }

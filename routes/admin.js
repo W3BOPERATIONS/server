@@ -6,8 +6,8 @@ const jwt = require("jsonwebtoken")
 const User = require("../models/User")
 
 router.get("/login", (req, res) => {
-  // Redirect to the frontend admin login page
-  res.redirect("https://chips-client.vercel.app/admin-login")
+  const clientUrl = process.env.CLIENT_URL_1 || process.env.CLIENT_URL_2 || "http://localhost:3000"
+  res.redirect(`${clientUrl}/admin-login`)
 })
 
 router.post("/login", async (req, res) => {
