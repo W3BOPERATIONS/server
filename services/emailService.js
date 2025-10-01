@@ -8,31 +8,15 @@ class EmailService {
 
   initializeTransporter() {
     if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+      // Gmail configuration using existing environment variables
       this.transporter = nodemailer.createTransport({
         service: "gmail",
-        host: "smtp.gmail.com",
-        port: 587,
-        secure: false, // Use TLS
         auth: {
           user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS, // Must be App Password for production
+          pass: process.env.EMAIL_PASS, // Use App Password for Gmail
         },
-        tls: {
-          rejectUnauthorized: false, // Allow self-signed certificates in development
-        },
-        debug: true, // Enable debug output
-        logger: true, // Log to console
       })
-
-      this.transporter.verify((error, success) => {
-        if (error) {
-          console.error("❌ Email service configuration error:", error)
-          console.error("⚠️  Make sure you're using a Gmail App Password, not your regular password")
-          console.error("⚠️  Generate one at: https://myaccount.google.com/apppasswords")
-        } else {
-          console.log("✅ Gmail email service configured and verified successfully")
-        }
-      })
+      console.log("📧 Gmail email service configured successfully")
     } else {
       // Development mode - use Ethereal Email (fake SMTP service)
       console.log("⚠️  No email configuration found. Using development mode.")
@@ -79,15 +63,12 @@ class EmailService {
 
     try {
       const mailOptions = {
-        from: `"ChipsStore" <${process.env.EMAIL_USER}>`, // Better from format
+        from: process.env.EMAIL_USER || "noreply@chipsstore.com",
         to: to,
         subject: subject,
         html: html,
         text: text || this.htmlToText(html),
       }
-
-      console.log("[v0] Attempting to send email to:", to)
-      console.log("[v0] Using email account:", process.env.EMAIL_USER)
 
       const info = await this.transporter.sendMail(mailOptions)
 
@@ -96,21 +77,12 @@ class EmailService {
         console.log("📧 Email sent successfully!")
         console.log("📧 Preview URL:", nodemailer.getTestMessageUrl(info))
       } else {
-        console.log("✅ Email sent successfully to:", to)
-        console.log("✅ Message ID:", info.messageId)
+        console.log("📧 Email sent successfully to:", to)
       }
 
       return { success: true, messageId: info.messageId }
     } catch (error) {
-      console.error("❌ Email sending failed:", error)
-      console.error("❌ Error details:", error.message)
-
-      if (error.code === "EAUTH") {
-        console.error("⚠️  Authentication failed. Please check:")
-        console.error("   1. EMAIL_USER is correct")
-        console.error("   2. EMAIL_PASS is a Gmail App Password (not regular password)")
-        console.error("   3. Generate App Password at: https://myaccount.google.com/apppasswords")
-      }
+      console.error("Email sending failed:", error)
 
       // Fallback to console logging in case of email service failure
       console.log("=== EMAIL FALLBACK (Service failed) ===")
@@ -120,7 +92,7 @@ class EmailService {
       console.log("Error:", error.message)
       console.log("=====================================")
 
-      throw error
+      return { success: false, error: error.message }
     }
   }
 

@@ -5,22 +5,12 @@ const nodemailer = require("nodemailer")
 const puppeteer = require("puppeteer")
 
 const createEmailTransporter = () => {
-  console.log("[v0] Creating email transporter with user:", process.env.EMAIL_USER)
-
   return nodemailer.createTransport({
     service: "gmail",
-    host: "smtp.gmail.com",
-    port: 587,
-    secure: false, // Use TLS
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS,
     },
-    tls: {
-      rejectUnauthorized: false, // Allow self-signed certificates in production
-    },
-    debug: true, // Enable debug logs
-    logger: true, // Enable logger
   })
 }
 
@@ -332,25 +322,13 @@ const generateInvoicePDF = async (orderData) => {
 const sendConfirmationEmail = async (orderData) => {
   try {
     console.log(`[v0] Preparing confirmation email for ${orderData.email}`)
-    console.log(`[v0] Email config - User: ${process.env.EMAIL_USER}, Pass exists: ${!!process.env.EMAIL_PASS}`)
-
     const transporter = createEmailTransporter()
 
-    try {
-      await transporter.verify()
-      console.log("[v0] Email transporter verified successfully")
-    } catch (verifyError) {
-      console.error("[v0] Email transporter verification failed:", verifyError)
-      throw new Error(`Email configuration error: ${verifyError.message}`)
-    }
-
     // Generate PDF invoice
-    console.log(`[v0] Generating PDF invoice for order ${orderData._id}`)
     const pdfBuffer = await generateInvoicePDF(orderData)
-    console.log(`[v0] PDF generated, size: ${pdfBuffer.length} bytes`)
 
     const mailOptions = {
-      from: `ChipsStore <${process.env.EMAIL_USER}>`, // Added sender name
+      from: process.env.EMAIL_USER || "noreply@chipsstore.com",
       to: orderData.email,
       subject: `Order Confirmation - ChipsStore (Order #${orderData._id})`,
       html: `
@@ -476,21 +454,11 @@ const sendConfirmationEmail = async (orderData) => {
       ],
     }
 
-    console.log(`[v0] Sending email to ${orderData.email}...`)
-    const info = await transporter.sendMail(mailOptions)
-    console.log(`[v0] Email sent successfully! Message ID: ${info.messageId}`)
-    console.log(`[v0] Email response:`, info.response)
-
+    await transporter.sendMail(mailOptions)
+    console.log(`[v0] Confirmation email with PDF invoice sent successfully to ${orderData.email}`)
     return true
   } catch (error) {
     console.error(`[v0] Error sending confirmation email:`, error)
-    console.error(`[v0] Error details:`, {
-      message: error.message,
-      code: error.code,
-      command: error.command,
-      response: error.response,
-      responseCode: error.responseCode,
-    })
     return false
   }
 }
