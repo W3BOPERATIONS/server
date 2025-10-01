@@ -347,154 +347,58 @@ const sendConfirmationEmail = async (orderData) => {
       console.error("[v0] Nodemailer transporter verification failed:", verifyErr)
     }
 
-    // Generate PDF invoice
+    // Generate PDF invoice (gracefully skips if puppeteer not available)
     const pdfBuffer = await generateInvoicePDF(orderData)
 
     const mailOptions = {
       from: process.env.EMAIL_USER || "noreply@chipsstore.com",
       to: orderData.email,
       subject: `Order Confirmation - ChipsStore (Order #${orderData._id})`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
-          <div style="text-align: center; margin-bottom: 30px; background: white; padding: 30px; border-radius: 10px;">
-            <h1 style="color: #4f46e5; margin-bottom: 10px; font-size: 32px;">ChipsStore</h1>
-            <p style="color: #6b7280; font-size: 16px; margin: 0;">Premium Chips & Snacks Delivered Fresh</p>
-          </div>
-          
-          <div style="background: linear-gradient(135deg, #059669, #10b981); padding: 30px; border-radius: 10px; margin-bottom: 30px; text-align: center;">
-            <div style="background: white; width: 60px; height: 60px; border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center;">
-              <div style="color: #059669; font-size: 24px; font-weight: bold; line-height: 1; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;">✓</div>
-            </div>
-            <h2 style="color: white; margin-bottom: 15px; font-size: 24px;">Order Confirmed Successfully!</h2>
-            <p style="color: #d1fae5; font-size: 16px; margin: 0;">
-              Dear <strong>${orderData.customerName}</strong>, thank you for your order!
-            </p>
-          </div>
-
-          <div style="background: white; border-radius: 10px; padding: 25px; margin-bottom: 25px; border-left: 4px solid #4f46e5;">
-            <h3 style="color: #4f46e5; margin-bottom: 15px; font-size: 18px;">📋 Order Summary:</h3>
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr><td style="padding: 8px 0; color: #6b7280;"><strong>Order Number:</strong></td><td style="padding: 8px 0; text-align: right; font-family: monospace;">${orderData._id}</td></tr>
-              <tr><td style="padding: 8px 0; color: #6b7280;"><strong>Order Date:</strong></td><td style="padding: 8px 0; text-align: right;">${new Date(orderData.createdAt).toLocaleDateString()}</td></tr>
-              <tr><td style="padding: 8px 0; color: #6b7280;"><strong>Total Amount:</strong></td><td style="padding: 8px 0; text-align: right; font-size: 18px; font-weight: bold; color: #059669;">₹${orderData.totalAmount.toFixed(2)}</td></tr>
-              <tr><td style="padding: 8px 0; color: #6b7280;"><strong>Payment Method:</strong></td><td style="padding: 8px 0; text-align: right;">${orderData.paymentMethod === "cod" ? "Cash on Delivery" : "Online Payment"}</td></tr>
-              <tr><td style="padding: 8px 0; color: #6b7280;"><strong>Delivery Address:</strong></td><td style="padding: 8px 0; text-align: right; max-width: 200px;">${orderData.address}</td></tr>
-            </table>
-          </div>
-
-          <div style="background: white; border-radius: 10px; padding: 25px; margin-bottom: 25px; border: 1px solid #e5e7eb;">
-            <h3 style="color: #4f46e5; margin-bottom: 15px; font-size: 18px;">🛍️ Order Items:</h3>
-            <table style="width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
-              <thead>
-                <tr style="background: linear-gradient(135deg, #4f46e5, #7c3aed);">
-                  <th style="color: white; padding: 12px; text-align: left; font-size: 12px; text-transform: uppercase;">Item</th>
-                  <th style="color: white; padding: 12px; text-align: center; font-size: 12px; text-transform: uppercase;">Qty</th>
-                  <th style="color: white; padding: 12px; text-align: right; font-size: 12px; text-transform: uppercase;">Price</th>
-                  <th style="color: white; padding: 12px; text-align: right; font-size: 12px; text-transform: uppercase;">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${orderData.items
-                  .map(
-                    (item, index) => `
-                  <tr style="background-color: ${index % 2 === 0 ? "#f8f9fa" : "white"};">
-                    <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;"><strong>${item.name}</strong></td>
-                    <td style="padding: 12px; text-align: center; border-bottom: 1px solid #e5e7eb;">${item.quantity}</td>
-                    <td style="padding: 12px; text-align: right; border-bottom: 1px solid #e5e7eb;">₹${item.price.toFixed(2)}</td>
-                    <td style="padding: 12px; text-align: right; border-bottom: 1px solid #e5e7eb;"><strong>₹${(item.price * item.quantity).toFixed(2)}</strong></td>
-                  </tr>
-                `,
-                  )
-                  .join("")}
-              </tbody>
-            </table>
-            
-            <div style="text-align: right; margin-top: 20px; background: #f8f9fa; padding: 20px; border-radius: 8px; border: 1px solid #e5e7eb;">
-              <div style="margin-bottom: 8px; font-size: 16px;">Subtotal: <strong>₹${orderData.subtotal.toFixed(2)}</strong></div>
-              <div style="margin-bottom: 8px; font-size: 16px;">Tax (8%): <strong>₹${orderData.tax.toFixed(2)}</strong></div>
-              <div style="margin-bottom: 12px; font-size: 16px;">Delivery: <strong style="color: #059669;">Free</strong></div>
-              <div style="font-weight: bold; font-size: 22px; color: #4f46e5; border-top: 2px solid #4f46e5; padding-top: 12px;">
-                Total Amount: ₹${orderData.totalAmount.toFixed(2)}
-              </div>
-            </div>
-          </div>
-
-          <div style="background: #eff6ff; border: 2px solid #dbeafe; border-radius: 10px; padding: 25px; margin-bottom: 25px;">
-            <h3 style="color: #1d4ed8; margin-bottom: 15px; font-size: 18px;">📦 What happens next?</h3>
-            <div style="color: #374151; line-height: 1.8;">
-              <div style="display: flex; align-items: center; margin-bottom: 10px;">
-                <span style="color: #059669; margin-right: 10px; font-size: 16px;">✅</span>
-                <span>Your order is being processed and quality checked</span>
-              </div>
-              <div style="display: flex; align-items: center; margin-bottom: 10px;">
-                <span style="color: #f59e0b; margin-right: 10px; font-size: 16px;">🏭</span>
-                <span>Fresh chips will be prepared and packaged carefully</span>
-              </div>
-              <div style="display: flex; align-items: center; margin-bottom: 10px;">
-                <span style="color: #3b82f6; margin-right: 10px; font-size: 16px;">🚚</span>
-                <span>Fast delivery within 2-3 business days</span>
-              </div>
-              <div style="display: flex; align-items: center; margin-bottom: 10px;">
-                <span style="color: #8b5cf6; margin-right: 10px; font-size: 16px;">📱</span>
-                <span>Track your order anytime in your profile</span>
-              </div>
-              <div style="display: flex; align-items: center;">
-                <span style="color: #ef4444; margin-right: 10px; font-size: 16px;">🎧</span>
-                <span>24/7 customer support available</span>
-              </div>
-            </div>
-          </div>
-
-          <div style="background: white; border-radius: 10px; padding: 25px; text-align: center; margin-bottom: 25px;">
-            <h3 style="color: #4f46e5; margin-bottom: 15px;">📄 Invoice Attached</h3>
-            <p style="color: #6b7280; margin-bottom: 15px;">
-              Your detailed invoice is attached as a PDF to this email for your records.
-            </p>
-            <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; display: inline-block;">
-              <span style="color: #374151; font-size: 14px;">📎 ChipsStore-Invoice-${orderData._id}.pdf</span>
-            </div>
-          </div>
-
-          <div style="text-align: center; background: white; padding: 25px; border-radius: 10px;">
-            <p style="color: #6b7280; font-size: 14px; margin-bottom: 15px;">
-              Need help? Contact us at <strong>support@chipsstore.com</strong> or <strong>+91-9876543210</strong>
-            </p>
-            <div style="border-top: 1px solid #e5e7eb; padding-top: 15px;">
-              <p style="color: #9ca3af; font-size: 12px; margin: 0;">
-                Thank you for choosing ChipsStore!<br>
-                🌐 www.chipsstore.com
-              </p>
-            </div>
-          </div>
-        </div>
-      `,
-      attachments: pdfBuffer
-        ? [
-            {
-              filename: `ChipsStore-Invoice-${orderData._id}.pdf`,
-              content: pdfBuffer,
-            },
-          ]
-        : [],
+      html: generateInvoiceHTML(orderData), // reuse same HTML content if desired
+      attachments: pdfBuffer ? [{ filename: `ChipsStore-Invoice-${orderData._id}.pdf`, content: pdfBuffer }] : [],
     }
 
     await transporter.sendMail(mailOptions)
     console.log(`[v0] Confirmation email sent successfully to ${orderData.email}`)
+    return true
   } catch (error) {
     console.error(`[v0] Error sending confirmation email:`, error)
+    return false
   }
 }
 
-router.post("/create", async (req, res) => {
+const createOrderHandler = async (req, res) => {
   try {
     const orderData = req.body
+
+    // Minimal validation to avoid empty orders causing 500
+    if (
+      !orderData?.email ||
+      !orderData?.customerName ||
+      !Array.isArray(orderData?.items) ||
+      orderData.items.length === 0
+    ) {
+      return res.status(400).json({ error: "Invalid order payload" })
+    }
+
     const newOrder = new Order(orderData)
     await newOrder.save()
-    await sendConfirmationEmail(newOrder)
-    res.status(201).json(newOrder)
+
+    const emailSent = await sendConfirmationEmail(newOrder)
+
+    // Explicitly include emailSent so the client can surface status
+    return res.status(201).json({
+      ...newOrder.toObject(),
+      emailSent,
+    })
   } catch (error) {
-    res.status(500).json({ error: error.message })
+    console.error("[v0] Order creation failed:", error)
+    return res.status(500).json({ error: error.message || "Failed to create order" })
   }
-})
+}
+
+// Accept both "/" and "/create" so existing clients keep working
+router.post("/", createOrderHandler)
+router.post("/create", createOrderHandler)
 
 module.exports = router
