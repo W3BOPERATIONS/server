@@ -11,6 +11,7 @@ const PORT = process.env.PORT || 5000
 const corsOrigins = [
   process.env.CLIENT_URL_1 || "http://localhost:3000",
   process.env.CLIENT_URL_2 || "https://www.crunchywavez.com",
+  "https://crunchywavez.com", // Allow all Vercel preview deployments
   "http://localhost:3000", // Vite default port
   "http://localhost:5173", // Alternative Vite port
   "https://chips-client.vercel.app",
