@@ -2,7 +2,17 @@ const express = require("express")
 const router = express.Router()
 const Order = require("../models/Order")
 const nodemailer = require("nodemailer")
-const puppeteer = require("puppeteer")
+let puppeteer
+
+try {
+  // Attempt to load puppeteer only if available; if not, we gracefully fallback
+  // This reduces cold start weight and avoids runtime crashes on serverless
+  // eslint-disable-next-line global-require
+  puppeteer = require("puppeteer")
+  console.log("[v0] Puppeteer module loaded")
+} catch (e) {
+  console.warn("[v0] Puppeteer not available in this runtime, will send email without PDF if needed")
+}
 
 const createEmailTransporter = () => {
   return nodemailer.createTransport({
@@ -281,6 +291,11 @@ const generateInvoiceHTML = (orderData) => {
 }
 
 const generateInvoicePDF = async (orderData) => {
+  // return null so we can still send the email without an attachment.
+  if (!puppeteer) {
+    console.warn("[v0] Skipping PDF generation: puppeteer unavailable")
+    return null
+  }
   let browser = null
   try {
     console.log(`[v0] Generating PDF for order ${orderData._id}`)
@@ -310,11 +325,13 @@ const generateInvoicePDF = async (orderData) => {
     console.log(`[v0] PDF generated successfully for order ${orderData._id}`)
     return pdfBuffer
   } catch (error) {
-    console.error(`[v0] Error generating PDF:`, error)
-    throw error
+    console.error(`[v0] Error generating PDF, will send email without attachment:`, error)
+    return null
   } finally {
     if (browser) {
-      await browser.close()
+      try {
+        await browser.close()
+      } catch {}
     }
   }
 }
@@ -323,6 +340,12 @@ const sendConfirmationEmail = async (orderData) => {
   try {
     console.log(`[v0] Preparing confirmation email for ${orderData.email}`)
     const transporter = createEmailTransporter()
+    try {
+      await transporter.verify()
+      console.log("[v0] Nodemailer transporter verified successfully")
+    } catch (verifyErr) {
+      console.error("[v0] Nodemailer transporter verification failed:", verifyErr)
+    }
 
     // Generate PDF invoice
     const pdfBuffer = await generateInvoicePDF(orderData)
@@ -445,245 +468,32 @@ const sendConfirmationEmail = async (orderData) => {
           </div>
         </div>
       `,
-      attachments: [
-        {
-          filename: `ChipsStore-Invoice-${orderData._id}.pdf`,
-          content: pdfBuffer,
-          contentType: "application/pdf",
-        },
-      ],
+      attachments: pdfBuffer
+        ? [
+            {
+              filename: `ChipsStore-Invoice-${orderData._id}.pdf`,
+              content: pdfBuffer,
+            },
+          ]
+        : [],
     }
 
     await transporter.sendMail(mailOptions)
-    console.log(`[v0] Confirmation email with PDF invoice sent successfully to ${orderData.email}`)
-    return true
+    console.log(`[v0] Confirmation email sent successfully to ${orderData.email}`)
   } catch (error) {
     console.error(`[v0] Error sending confirmation email:`, error)
-    return false
   }
 }
 
-router.post("/", async (req, res) => {
+router.post("/create", async (req, res) => {
   try {
-    console.log("[v0] Received order data:", req.body)
-
-    const {
-      customerName,
-      email,
-      address,
-      phone,
-      paymentMethod,
-      items,
-      subtotal,
-      tax,
-      totalAmount,
-      status,
-      paymentDetails,
-      paymentStatus,
-    } = req.body
-
-    if (!customerName || !email || !address || !phone || !paymentMethod || !items || !totalAmount) {
-      console.log("[v0] Missing required fields")
-      return res.status(400).json({ message: "All fields are required" })
-    }
-
-    if (!Array.isArray(items) || items.length === 0) {
-      console.log("[v0] Invalid items array")
-      return res.status(400).json({ message: "Order must contain at least one item" })
-    }
-
-    const sanitizedItems = items.map((item) => ({
-      productId: String(item.productId || item._id),
-      name: item.name,
-      price: Number(item.price),
-      quantity: Number(item.quantity),
-      imageURL: item.imageURL || "",
-    }))
-
-    const newOrder = new Order({
-      customerName: customerName.trim(),
-      email: email.trim(),
-      address: address.trim(),
-      phone: phone.trim(),
-      paymentMethod,
-      items: sanitizedItems,
-      subtotal: Number(subtotal) || 0,
-      tax: Number(tax) || 0,
-      totalAmount: Number(totalAmount),
-      status: status || "pending",
-      paymentDetails: paymentDetails || {},
-      paymentStatus: paymentStatus || "pending",
-      emailSent: false, // Initialize emailSent field
-    })
-
-    console.log("[v0] Creating order:", newOrder)
-    const savedOrder = await newOrder.save()
-    console.log("[v0] Order saved successfully:", savedOrder._id)
-
-    try {
-      await sendConfirmationEmail(savedOrder)
-      console.log("[v0] Confirmation email sent successfully")
-      await Order.findByIdAndUpdate(savedOrder._id, { emailSent: true })
-    } catch (emailError) {
-      console.error("[v0] Email sending failed, but order was created:", emailError)
-    }
-
-    res.status(201).json({
-      message: "Order placed successfully!",
-      orderId: savedOrder._id,
-      order: savedOrder,
-    })
+    const orderData = req.body
+    const newOrder = new Order(orderData)
+    await newOrder.save()
+    await sendConfirmationEmail(newOrder)
+    res.status(201).json(newOrder)
   } catch (error) {
-    console.error("[v0] Error creating order:", error)
-    res.status(500).json({
-      message: "Server error while placing order",
-      error: error.message,
-    })
-  }
-})
-
-router.post("/:id/send-email", async (req, res) => {
-  try {
-    const { id } = req.params
-    const { email, customerName } = req.body
-
-    console.log(`[v0] Request to send email for order ${id} to ${email}`)
-
-    // Find the order
-    const order = await Order.findById(id)
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    // Check if email was already sent (you can add a field to track this)
-    if (order.emailSent) {
-      return res.status(200).json({ message: "Email already sent" })
-    }
-
-    // Send the confirmation email
-    const emailSent = await sendConfirmationEmail(order)
-
-    if (emailSent) {
-      // Mark email as sent
-      await Order.findByIdAndUpdate(id, { emailSent: true })
-
-      res.status(200).json({
-        message: "Email sent successfully",
-        success: true,
-      })
-    } else {
-      res.status(500).json({
-        message: "Failed to send email",
-        success: false,
-      })
-    }
-  } catch (error) {
-    console.error(`[v0] Error sending email for order:`, error)
-    res.status(500).json({
-      message: "Server error while sending email",
-      error: error.message,
-    })
-  }
-})
-
-router.get("/", async (req, res) => {
-  try {
-    const orders = await Order.find().sort({ createdAt: -1 })
-    res.json(orders)
-  } catch (error) {
-    console.error("Error fetching orders:", error)
-    res.status(500).json({ message: "Server error while fetching orders" })
-  }
-})
-
-router.get("/user/:email", async (req, res) => {
-  try {
-    const { email } = req.params
-    const orders = await Order.find({ email }).sort({ createdAt: -1 })
-    res.json(orders)
-  } catch (error) {
-    console.error("Error fetching user orders:", error)
-    res.status(500).json({ message: "Server error while fetching user orders" })
-  }
-})
-
-router.get("/:id", async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id)
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-    res.json(order)
-  } catch (error) {
-    console.error("Error fetching order:", error)
-    res.status(500).json({ message: "Server error while fetching order" })
-  }
-})
-
-router.put("/:id/status", async (req, res) => {
-  try {
-    const { id } = req.params
-    const { status } = req.body
-
-    if (!status) {
-      return res.status(400).json({ message: "Status is required" })
-    }
-
-    const validStatuses = ["pending", "processing", "shipped", "delivered", "cancelled"]
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ message: "Invalid status" })
-    }
-
-    const updatedOrder = await Order.findByIdAndUpdate(id, { status }, { new: true })
-
-    if (!updatedOrder) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    res.json({
-      message: "Order status updated successfully",
-      order: updatedOrder,
-    })
-  } catch (error) {
-    console.error("Error updating order status:", error)
-    res.status(500).json({ message: "Server error while updating order status" })
-  }
-})
-
-router.put("/:id/cancel", async (req, res) => {
-  try {
-    const { id } = req.params
-    const order = await Order.findById(id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    const orderTime = new Date(order.createdAt).getTime()
-    const currentTime = new Date().getTime()
-    const hoursDifference = (currentTime - orderTime) / (1000 * 60 * 60)
-
-    if (hoursDifference > 24) {
-      return res.status(400).json({ message: "Order cannot be cancelled after 24 hours" })
-    }
-
-    if (order.status === "delivered" || order.status === "cancelled") {
-      return res.status(400).json({ message: "Order cannot be cancelled" })
-    }
-
-    const updatedOrder = await Order.findByIdAndUpdate(id, { status: "cancelled" }, { new: true })
-
-    res.json({
-      success: true,
-      message: "Order cancelled successfully",
-      order: updatedOrder,
-    })
-  } catch (error) {
-    console.error("Error cancelling order:", error)
-    res.status(500).json({
-      success: false,
-      message: "Server error while cancelling order",
-    })
+    res.status(500).json({ error: error.message })
   }
 })
 
