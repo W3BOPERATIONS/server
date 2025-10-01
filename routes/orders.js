@@ -401,4 +401,84 @@ const createOrderHandler = async (req, res) => {
 router.post("/", createOrderHandler)
 router.post("/create", createOrderHandler)
 
+// Get all orders for a user (used by OrdersPage, ProfilePage)
+router.get("/user/:email", async (req, res) => {
+  try {
+    const { email } = req.params
+    if (!email) return res.status(400).json({ message: "Email is required" })
+    console.log("[v0] Fetching orders for user:", email)
+    const orders = await Order.find({ email }).sort({ createdAt: -1 })
+    return res.json(orders)
+  } catch (error) {
+    console.error("[v0] Error fetching user orders:", error)
+    return res.status(500).json({ message: "Server error while fetching orders" })
+  }
+})
+
+// Cancel order endpoint (client expects { success: true, order })
+router.put("/:id/cancel", async (req, res) => {
+  try {
+    const { id } = req.params
+    const order = await Order.findById(id)
+    if (!order) return res.status(404).json({ message: "Order not found" })
+
+    if (order.status === "delivered" || order.status === "cancelled") {
+      return res.status(400).json({ message: "Order cannot be cancelled" })
+    }
+
+    // enforce same 24h rule used in UI
+    const orderTime = new Date(order.createdAt).getTime()
+    const hoursDiff = (Date.now() - orderTime) / (1000 * 60 * 60)
+    if (hoursDiff > 24) {
+      return res.status(400).json({ message: "Orders can only be cancelled within 24 hours" })
+    }
+
+    order.status = "cancelled"
+    await order.save()
+    return res.json({ success: true, order })
+  } catch (error) {
+    console.error("[v0] Error cancelling order:", error)
+    return res.status(500).json({ message: "Server error while cancelling order" })
+  }
+})
+
+// Update order status (AdminPage expects PUT /api/orders/:id/status)
+router.put("/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params
+    const { status } = req.body
+    const allowed = ["pending", "processing", "shipped", "delivered", "cancelled"]
+    if (!allowed.includes(status)) {
+      return res.status(400).json({ message: "Invalid status" })
+    }
+
+    const order = await Order.findByIdAndUpdate(id, { status }, { new: true })
+    if (!order) return res.status(404).json({ message: "Order not found" })
+    return res.json({ success: true, order })
+  } catch (error) {
+    console.error("[v0] Error updating order status:", error)
+    return res.status(500).json({ message: "Server error while updating order status" })
+  }
+})
+
+// Resend confirmation email for an order (used by Invoice/Resend flow)
+router.post("/:id/send-email", async (req, res) => {
+  try {
+    const { id } = req.params
+    const order = await Order.findById(id)
+    if (!order) return res.status(404).json({ message: "Order not found" })
+
+    const emailSent = await sendConfirmationEmail(order)
+    // persist emailSent flag if desired
+    if (emailSent && !order.emailSent) {
+      order.emailSent = true
+      await order.save()
+    }
+    return res.json({ success: emailSent })
+  } catch (error) {
+    console.error("[v0] Error sending order confirmation email:", error)
+    return res.status(500).json({ message: "Server error while sending order email" })
+  }
+})
+
 module.exports = router
