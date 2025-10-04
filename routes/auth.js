@@ -3,22 +3,12 @@ const jwt = require("jsonwebtoken")
 const User = require("../models/User")
 const auth = require("../middleware/auth")
 const crypto = require("crypto")
-const bcrypt = require("bcryptjs")
 const emailService = require("../services/emailService")
 
 const router = express.Router()
 
 const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString()
-}
-
-const hashPassword = async (password) => {
-  const salt = await bcrypt.genSalt(10)
-  return await bcrypt.hash(password, salt)
-}
-
-const comparePassword = async (password, hashedPassword) => {
-  return await bcrypt.compare(password, hashedPassword)
 }
 
 // Register
@@ -66,12 +56,10 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ message: "User with this email already exists" })
     }
 
-    const hashedPassword = await hashPassword(password)
-
     user = new User({
       name: name.trim(),
       email: email.trim().toLowerCase(),
-      password: hashedPassword,
+      password: password, // Plain text password
       phone: cleanPhone,
       wishlist: [],
     })
@@ -127,7 +115,7 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ message: "Invalid email or password. Please check your credentials." })
     }
 
-    const isMatch = await comparePassword(password, user.password)
+    const isMatch = password === user.password
     if (!isMatch) {
       return res.status(400).json({ message: "Invalid email or password. Please check your credentials." })
     }
@@ -380,9 +368,7 @@ router.post("/reset-password", async (req, res) => {
       return res.status(400).json({ message: "Invalid or expired reset token" })
     }
 
-    const hashedPassword = await hashPassword(password)
-
-    user.password = hashedPassword
+    user.password = password
     user.resetToken = null
     user.resetTokenExpiry = null
     await user.save()

@@ -67,6 +67,43 @@ const productSchema = new mongoose.Schema(
       type: Number,
       min: 0,
     },
+    isHamper: {
+      type: Boolean,
+      default: false,
+    },
+    packetsPerHamper: {
+      type: Number,
+      default: 10,
+      min: 1,
+    },
+    packetPrice: {
+      type: Number,
+      default: 20,
+      min: 0,
+    },
+    packetWeightGrams: {
+      type: Number,
+      default: 30,
+      min: 0,
+    },
+    ingredients: {
+      type: String,
+      trim: true,
+    },
+    nutritionInfo: {
+      calories: { type: String, trim: true }, // e.g., "113 kcal"
+      protein: { type: String, trim: true }, // e.g., "7g"
+      carbs: { type: String, trim: true }, // e.g., "19g"
+      fat: { type: String, trim: true }, // e.g., "1g"
+      sodium: { type: String, trim: true }, // e.g., "210mg"
+      servingSize: { type: String, trim: true }, // e.g., "30g"
+    },
+    contents: [
+      {
+        flavor: { type: String, trim: true },
+        count: { type: Number, min: 1 },
+      },
+    ],
   },
   {
     timestamps: true,
@@ -79,6 +116,13 @@ productSchema.virtual("stock").get(function () {
 
 productSchema.virtual("stock").set(function (value) {
   this.quantity = value
+})
+
+productSchema.virtual("totalWeightGrams").get(function () {
+  if (!this.isHamper) return undefined
+  const packets = this.packetsPerHamper || 0
+  const weight = this.packetWeightGrams || 0
+  return packets * weight
 })
 
 productSchema.methods.calculateAverageRating = function () {

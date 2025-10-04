@@ -26,9 +26,27 @@ router.get("/", async (req, res) => {
       ]
     }
 
+    const flavorSlugMap = {
+      "salty-hungama": "Salty Hungama",
+      "tomato-chatpata": "Tomato Chatpata",
+      "onion-tadka": "Onion Tadka",
+      "desi-garlic": "Desi Garlic",
+      "chilli-lemon": "Chilli Lemon",
+    }
+
     // Category filter
     if (category && category !== "all") {
-      query.category = category
+      if (flavorSlugMap[category]) {
+        // filter hampers that include this flavor
+        query.isHamper = true
+        query["contents.flavor"] = flavorSlugMap[category]
+      } else if (category === "variety-hamper") {
+        // seed uses 'hampers-variety'
+        query.category = "hampers-variety"
+      } else {
+        // fall back to direct category match
+        query.category = category
+      }
     }
 
     // Price range filter
@@ -79,16 +97,12 @@ router.get("/", async (req, res) => {
 // GET /api/products/categories - Fetch all categories
 router.get("/categories", async (req, res) => {
   try {
-    // Sample categories data - you can later move this to a database model
     const categories = [
-      { id: "potato-chips", name: "Potato Chips", icon: "🥔" },
-      { id: "corn-chips", name: "Corn Chips", icon: "🌽" },
-      { id: "tortilla-chips", name: "Tortilla Chips", icon: "🌮" },
-      { id: "veggie-chips", name: "Veggie Chips", icon: "🥕" },
-      { id: "protein-chips", name: "Protein Chips", icon: "💪" },
-      { id: "sweet-chips", name: "Sweet Chips", icon: "🍠" },
-      { id: "international", name: "International", icon: "🌍" },
-      { id: "healthy-snacks", name: "Healthy Snacks", icon: "🥗" },
+      { id: "salty-hungama", name: "Salty Hungama", icon: "🧂" },
+      { id: "tomato-chatpata", name: "Tomato Chatpata", icon: "🍅" },
+      { id: "onion-tadka", name: "Onion Tadka", icon: "🧅" },
+      { id: "desi-garlic", name: "Desi Garlic", icon: "🧄" },
+      { id: "chilli-lemon", name: "Chilli Lemon", icon: "🌶️" },
     ]
 
     res.json(categories)

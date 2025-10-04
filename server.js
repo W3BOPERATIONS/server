@@ -77,7 +77,18 @@ const connectDB = async () => {
 
     console.log("MONGODB_URI found:", process.env.MONGODB_URI ? "Yes" : "No")
 
-    connectionPromise = mongoose.connect(process.env.MONGODB_URI, {
+    let mongoUri = process.env.MONGODB_URI
+
+    // Replace any existing database name with 'chips'
+    if (mongoUri.includes("?")) {
+      // URI has query parameters: mongodb://.../{dbname}?params
+      mongoUri = mongoUri.replace(/\/[^/?]+\?/, "/chips?")
+    } else {
+      // URI has no query parameters: mongodb://.../{dbname}
+      mongoUri = mongoUri.replace(/\/[^/]+$/, "/chips")
+    }
+
+    connectionPromise = mongoose.connect(mongoUri, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
       serverSelectionTimeoutMS: 10000,

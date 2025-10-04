@@ -4,11 +4,23 @@ require("dotenv").config()
 
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGODB_URI, {
+    let mongoUri = process.env.MONGODB_URI
+
+    // Replace any existing database name with 'chips'
+    if (mongoUri.includes("?")) {
+      // URI has query parameters: mongodb://.../{dbname}?params
+      mongoUri = mongoUri.replace(/\/[^/?]+\?/, "/chips?")
+    } else {
+      // URI has no query parameters: mongodb://.../{dbname}
+      mongoUri = mongoUri.replace(/\/[^/]+$/, "/chips")
+    }
+
+    await mongoose.connect(mongoUri, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
     })
     console.log("✅ MongoDB connected successfully")
+    console.log("📊 Database:", mongoose.connection.name)
   } catch (err) {
     console.error("❌ MongoDB connection error:", err.message)
     process.exit(1)
@@ -22,7 +34,6 @@ const addUsers = async () => {
     const deletedCount = await User.deleteMany({})
     console.log(`🗑️ Cleared ${deletedCount.deletedCount} existing users`)
 
-    // Create sample users with plain text passwords (no encryption)
     const users = [
       {
         name: "Admin User",
@@ -92,6 +103,7 @@ const addUsers = async () => {
 
     console.log("\n✅ Database seeded successfully! You can now login with these credentials.")
     console.log("💡 New users can also register and then login normally.")
+    console.log(`\n📊 All data stored in database: ${mongoose.connection.name}`)
 
     process.exit(0)
   } catch (error) {
