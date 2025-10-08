@@ -12,6 +12,11 @@ const orderSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    userEmail: {
+      type: String,
+      trim: true,
+      index: true,
+    },
     address: {
       type: String,
       required: true,

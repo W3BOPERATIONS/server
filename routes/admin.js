@@ -207,20 +207,54 @@ router.get("/orders", adminAuth, async (req, res) => {
 
 router.put("/orders/:id/status", adminAuth, async (req, res) => {
   try {
-    const { status } = req.body
+    const { status: requestedStatus } = req.body
     const validStatuses = ["pending", "processing", "shipped", "delivered", "cancelled"]
 
-    if (!validStatuses.includes(status)) {
+    if (!validStatuses.includes(requestedStatus)) {
       return res.status(400).json({ message: "Invalid status" })
     }
 
-    const updatedOrder = await Order.findByIdAndUpdate(req.params.id, { status }, { new: true })
-
-    if (!updatedOrder) {
+    const order = await Order.findById(req.params.id)
+    if (!order) {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    res.json(updatedOrder)
+    const current = order.status
+    if (current === "delivered" || current === "cancelled") {
+      return res.status(400).json({ message: `Order is already ${current} and cannot be updated` })
+    }
+
+    const flow = ["pending", "processing", "shipped", "delivered"]
+    const currentIdx = flow.indexOf(current)
+    const requestedIdx = flow.indexOf(requestedStatus)
+
+    if (requestedStatus === "cancelled") {
+      if (!(current === "pending" || current === "processing")) {
+        return res.status(400).json({ message: "Only pending or processing orders can be cancelled" })
+      }
+      const orderTime = new Date(order.createdAt).getTime()
+      const hoursDiff = (Date.now() - orderTime) / (1000 * 60 * 60)
+      if (hoursDiff > 24) {
+        return res.status(400).json({ message: "Orders can only be cancelled within 24 hours" })
+      }
+      order.status = "cancelled"
+      await order.save()
+      return res.json(order)
+    }
+
+    if (requestedIdx === -1) {
+      return res.status(400).json({ message: "Invalid status transition" })
+    }
+    if (requestedIdx === currentIdx) {
+      return res.json(order) // no-op
+    }
+    if (requestedIdx !== currentIdx + 1) {
+      return res.status(400).json({ message: "Status can only move forward step-by-step" })
+    }
+
+    order.status = requestedStatus
+    await order.save()
+    return res.json(order)
   } catch (error) {
     console.error("Error updating order status:", error)
     res.status(500).json({ message: "Server error while updating order" })

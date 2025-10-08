@@ -201,6 +201,19 @@ const generateInvoiceHTML = (orderData) => {
           body { padding: 0; }
           .invoice-container { border: none; box-shadow: none; }
         }
+        @media (max-width: 640px) {
+          body { padding: 10px; font-size: 12px; }
+          .invoice-container { padding: 20px; }
+          .company-name { font-size: 24px; }
+          .invoice-title { font-size: 20px; }
+          .invoice-details { flex-direction: column; gap: 15px; }
+          .customer-details, .invoice-info { width: 100%; padding: 15px; }
+          .table th, .table td { padding: 10px 6px; font-size: 11px; }
+          .total-section { padding: 15px; }
+          .total-row { font-size: 18px; }
+          .footer h4 { font-size: 16px; }
+          .footer p { font-size: 11px; }
+        }
       </style>
     </head>
     <body>
@@ -264,7 +277,6 @@ const generateInvoiceHTML = (orderData) => {
 
         <div class="total-section">
           <p>Subtotal: <strong>₹${orderData.subtotal.toFixed(2)}</strong></p>
-          <p>Tax (8%): <strong>₹${orderData.tax.toFixed(2)}</strong></p>
           <p>Delivery: <strong style="color: #059669;">Free</strong></p>
           <p class="total-row">Total Amount: ₹${orderData.totalAmount.toFixed(2)}</p>
         </div>
@@ -381,7 +393,12 @@ const createOrderHandler = async (req, res) => {
       return res.status(400).json({ error: "Invalid order payload" })
     }
 
-    const newOrder = new Order(orderData)
+    const payload = {
+      ...orderData,
+      userEmail: orderData.userEmail || orderData.email,
+    }
+
+    const newOrder = new Order(payload)
     await newOrder.save()
 
     const emailSent = await sendConfirmationEmail(newOrder)
@@ -407,7 +424,7 @@ router.get("/user/:email", async (req, res) => {
     const { email } = req.params
     if (!email) return res.status(400).json({ message: "Email is required" })
     console.log("[v0] Fetching orders for user:", email)
-    const orders = await Order.find({ email }).sort({ createdAt: -1 })
+    const orders = await Order.find({ $or: [{ userEmail: email }, { email }] }).sort({ createdAt: -1 })
     return res.json(orders)
   } catch (error) {
     console.error("[v0] Error fetching user orders:", error)
@@ -446,14 +463,58 @@ router.put("/:id/cancel", async (req, res) => {
 router.put("/:id/status", async (req, res) => {
   try {
     const { id } = req.params
-    const { status } = req.body
+    const { status: requestedStatus } = req.body
+
     const allowed = ["pending", "processing", "shipped", "delivered", "cancelled"]
-    if (!allowed.includes(status)) {
+    if (!allowed.includes(requestedStatus)) {
       return res.status(400).json({ message: "Invalid status" })
     }
 
-    const order = await Order.findByIdAndUpdate(id, { status }, { new: true })
+    const order = await Order.findById(id)
     if (!order) return res.status(404).json({ message: "Order not found" })
+
+    const current = order.status
+
+    // If already final states, block further changes
+    if (current === "delivered" || current === "cancelled") {
+      return res.status(400).json({ message: `Order is already ${current} and cannot be updated` })
+    }
+
+    // Prevent changing status after delivered/cancelled and prevent reverting backwards
+    const flow = ["pending", "processing", "shipped", "delivered"]
+    const currentIdx = flow.indexOf(current)
+    const requestedIdx = flow.indexOf(requestedStatus)
+
+    // Handle cancellation rules: allow cancel only from pending or processing within 24h
+    if (requestedStatus === "cancelled") {
+      if (!(current === "pending" || current === "processing")) {
+        return res.status(400).json({ message: "Only pending or processing orders can be cancelled" })
+      }
+      const orderTime = new Date(order.createdAt).getTime()
+      const hoursDiff = (Date.now() - orderTime) / (1000 * 60 * 60)
+      if (hoursDiff > 24) {
+        return res.status(400).json({ message: "Orders can only be cancelled within 24 hours" })
+      }
+      order.status = "cancelled"
+      await order.save()
+      return res.json({ success: true, order })
+    }
+
+    // For non-cancel transitions, only allow moving to the immediate next step
+    // e.g., pending->processing, processing->shipped, shipped->delivered
+    if (requestedIdx === -1) {
+      return res.status(400).json({ message: "Invalid status transition" })
+    }
+    if (requestedIdx === currentIdx) {
+      // No-op: same status
+      return res.json({ success: true, order })
+    }
+    if (requestedIdx !== currentIdx + 1) {
+      return res.status(400).json({ message: "Status can only move forward step-by-step" })
+    }
+
+    order.status = requestedStatus
+    await order.save()
     return res.json({ success: true, order })
   } catch (error) {
     console.error("[v0] Error updating order status:", error)
